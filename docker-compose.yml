@@ -1,0 +1,67 @@
+services:
+
+  # ── Event bus compartilhado entre Omni e Genie ────────────────────────────
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js", "-p", "4222"]
+    ports:
+      - "4222:4222"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Bridge WhatsApp ────────────────────────────────────────────────────────
+  omni:
+    build:
+      context: .
+      dockerfile: docker/omni/Dockerfile
+    environment:
+      NODE_ENV: production
+      API_PORT: "8882"
+      API_HOST: "0.0.0.0"
+      NATS_URL: "nats://nats:4222"
+      NATS_MANAGED: "false"
+      PGSERVE_EMBEDDED: "true"
+      PGSERVE_DATA: /omni-data/pgserve
+      OMNI_API_KEY: "${OMNI_API_KEY:-}"
+    ports:
+      - "8882:8882"
+    volumes:
+      - omni-data:/omni-data
+    depends_on:
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8882/api/v2/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 45s
+
+  # ── Orquestrador Claude ────────────────────────────────────────────────────
+  genie:
+    build:
+      context: .
+      dockerfile: docker/genie/Dockerfile
+    environment:
+      GENIE_HOME: /genie-data
+      GENIE_NATS_URL: "nats:4222"
+      GENIE_EXECUTOR: "sdk"
+      OMNI_API_URL: "http://omni:8882"
+      OMNI_API_KEY: "${OMNI_API_KEY}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+    volumes:
+      - genie-data:/genie-data
+      - agent-db:/data
+      - ./workspace:/workspace
+      - ./tools:/tools
+    depends_on:
+      omni:
+        condition: service_healthy
+
+volumes:
+  omni-data:
+  genie-data:
+  agent-db:

@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "agents": {
+    "defaults": {
+      "provider": "claude-sdk",
+      "model": "claude-sonnet-4-5"
+    }
+  }
+}
