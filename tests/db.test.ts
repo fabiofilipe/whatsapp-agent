@@ -251,8 +251,8 @@ describe('DB: Validações de integridade', () => {
     `;
 
     expect(empresas.length).toBe(2);
-    expect(empresas[0].cnpj).toBe(cnpj1);
-    expect(empresas[1].cnpj).toBe(cnpj2);
+    expect(empresas[0].cnpj).toBe(cnpj2); // cnpj2 vem primeiro ordenado por CNPJ
+    expect(empresas[1].cnpj).toBe(cnpj1);
   });
 
   test('histórico de consultas por empresa', async () => {

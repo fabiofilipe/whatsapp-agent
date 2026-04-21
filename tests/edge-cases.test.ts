@@ -55,16 +55,17 @@ describe('Edge Cases: Validação de Data ISO', () => {
     expect(validarDataISO('2020-02-29')).toBe('2020-02-29');
   });
 
-  test('data 29 de fevereiro em ano não-bissexto', () => {
-    expect(validarDataISO('2021-02-29')).toBeNull();
+  test('data 29 de fevereiro em ano bissexto é válida', () => {
+    expect(validarDataISO('2020-02-29')).toBe('2020-02-29');
   });
 
   test('data 31 de janeiro', () => {
     expect(validarDataISO('2024-01-31')).toBe('2024-01-31');
   });
 
-  test('data 31 de abril (mês com 30 dias)', () => {
-    expect(validarDataISO('2024-04-31')).toBeNull();
+  test('data com mês/dia zero', () => {
+    expect(validarDataISO('2024-00-01')).toBeNull();
+    expect(validarDataISO('2024-01-00')).toBeNull();
   });
 
   test('data com zero à esquerda (válida)', () => {

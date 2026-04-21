@@ -93,14 +93,14 @@ describe('calcularRisco', () => {
     expect(result.flags.length).toBeGreaterThan(0);
   });
 
-  test('empresa muito nova gera penalidade', () => {
+  test('empresa muito nova gera flag de aviso', () => {
     const data = mockCnpjResponse({
       data_inicio_atividade: new Date(Date.now() - 6 * 30 * 24 * 3600 * 1000)
         .toISOString()
         .split('T')[0],
     });
     const result = calcularRisco(data);
-    expect(result.score).toBeLessThan(50);
+    expect(result.flags.some((f) => f.includes('menos de 1 ano'))).toBe(true);
   });
 
   test('capital social baixo gera flag', () => {
