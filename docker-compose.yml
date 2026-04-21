@@ -3,7 +3,7 @@ services:
   # ── Event bus compartilhado entre Omni e Genie ────────────────────────────
   nats:
     image: nats:2.10-alpine
-    command: ["-js", "-p", "4222"]
+    command: ["-js", "-p", "4222", "-m", "8222"]
     ports:
       - "4222:4222"
     healthcheck:
@@ -40,6 +40,22 @@ services:
       retries: 15
       start_period: 45s
 
+  # ── Banco de dados do agente (Due Diligence) ──────────────────────────────
+  agent-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: agent
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: "${AGENT_DB_PASSWORD:-agent}"
+    volumes:
+      - agent-db-data:/var/lib/postgresql/data
+      - ./docker/agent-db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # ── Orquestrador Claude ────────────────────────────────────────────────────
   genie:
     build:
@@ -52,16 +68,18 @@ services:
       OMNI_API_URL: "http://omni:8882"
       OMNI_API_KEY: "${OMNI_API_KEY}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      DATABASE_URL: "postgres://agent:${AGENT_DB_PASSWORD:-agent}@agent-db:5432/agent"
     volumes:
       - genie-data:/genie-data
-      - agent-db:/data
       - ./workspace:/workspace
       - ./tools:/tools
     depends_on:
       omni:
         condition: service_healthy
+      agent-db:
+        condition: service_healthy
 
 volumes:
   omni-data:
+  agent-db-data:
   genie-data:
-  agent-db:
