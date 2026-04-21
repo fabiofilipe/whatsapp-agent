@@ -1,24 +1,25 @@
 FROM oven/bun:latest
 
-RUN apt-get update && apt-get install -y \
-    git curl jq postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
+# Instalacoes como root (evita SIGBUS do Docker Desktop/WSL2 em usuarios nao-root)
+RUN apt-get update && apt-get install -y curl postgresql-client gosu && rm -rf /var/lib/apt/lists/*
 
-# Install Genie globally from npm
+# Instala Genie como root
 RUN bun add -g @automagik/genie
 
-WORKDIR /workspace
+# Cria usuario nao-root para o pgserve (initdb recusa root)
+RUN useradd -m -u 1001 -s /bin/bash genie && \
+    chmod o+rx /root && \
+    chmod -R o+rx /root/.bun
 
-# Copy workspace (agents + .genie config)
+# Copia workspace e tools como root, ajusta ownership para genie
 COPY workspace/ /workspace/
-
-# Copy tool sources + install dependencies
 COPY tools/ /tools/
-WORKDIR /tools
-RUN bun install --production --frozen-lockfile 2>/dev/null || bun install --production
-WORKDIR /workspace
+RUN chown -R genie:genie /workspace /tools && \
+    cd /tools && bun install --production
 
 COPY docker/genie/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+WORKDIR /workspace
 
 ENTRYPOINT ["/entrypoint.sh"]

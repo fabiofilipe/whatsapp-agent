@@ -12,7 +12,25 @@ services:
       timeout: 3s
       retries: 10
 
+  # ── Banco de dados do Omni ────────────────────────────────────────────────
+  # Separado do agent-db para isolar domínios
+  omni-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: omni
+      POSTGRES_USER: omni
+      POSTGRES_PASSWORD: "${OMNI_DB_PASSWORD:-omni}"
+    volumes:
+      - omni-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omni -d omni"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # ── Bridge WhatsApp ────────────────────────────────────────────────────────
+  # PGSERVE_EMBEDDED=false: usa Postgres externo (omni-db) em vez do embutido
+  # Elimina restricao de usuario root do initdb
   omni:
     build:
       context: .
@@ -23,15 +41,15 @@ services:
       API_HOST: "0.0.0.0"
       NATS_URL: "nats://nats:4222"
       NATS_MANAGED: "false"
-      PGSERVE_EMBEDDED: "true"
-      PGSERVE_DATA: /omni-data/pgserve
+      PGSERVE_EMBEDDED: "false"
+      DATABASE_URL: "postgresql://omni:${OMNI_DB_PASSWORD:-omni}@omni-db:5432/omni"
       OMNI_API_KEY: "${OMNI_API_KEY:-}"
     ports:
       - "8882:8882"
-    volumes:
-      - omni-data:/omni-data
     depends_on:
       nats:
+        condition: service_healthy
+      omni-db:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8882/api/v2/health"]
@@ -57,12 +75,14 @@ services:
       retries: 10
 
   # ── Orquestrador Claude ────────────────────────────────────────────────────
+  # Roda como usuario nao-root (uid 1001) para o pgserve interno funcionar
   genie:
     build:
       context: .
       dockerfile: docker/genie/Dockerfile
+    user: "1001:1001"
     environment:
-      GENIE_HOME: /genie-data
+      GENIE_HOME: /home/genie/.genie
       GENIE_NATS_URL: "nats:4222"
       GENIE_EXECUTOR: "sdk"
       OMNI_API_URL: "http://omni:8882"
@@ -70,7 +90,7 @@ services:
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
       DATABASE_URL: "postgres://agent:${AGENT_DB_PASSWORD:-agent}@agent-db:5432/agent"
     volumes:
-      - genie-data:/genie-data
+      - genie-data:/home/genie/.genie
       - ./workspace:/workspace
       - ./tools:/tools
     depends_on:
@@ -80,6 +100,6 @@ services:
         condition: service_healthy
 
 volumes:
-  omni-data:
+  omni-db-data:
   agent-db-data:
   genie-data:

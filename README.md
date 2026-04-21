@@ -136,18 +136,24 @@ cp .env.example .env
 
 No `.env`, preencha:
 - `ANTHROPIC_API_KEY` — sua chave da Anthropic
-- `AGENT_DB_PASSWORD` — opcional; use uma senha forte em produção
+- `AGENT_DB_PASSWORD` e `OMNI_DB_PASSWORD` — opcionais; use senhas fortes em produção
 
-### 2. Subir infraestrutura base
+### 2. Build
 
 ```bash
-docker compose up nats omni agent-db --build
+docker compose build
 ```
 
-Aguarde cerca de 45 segundos. A `OMNI_API_KEY` aparece no log do container omni:
+### 3. Subir infraestrutura base
 
+```bash
+docker compose up nats omni-db omni agent-db -d
 ```
-[omni] Primary API Key: omni_xxxxxxxxxxxx
+
+Aguarde cerca de 30 segundos. A `OMNI_API_KEY` aparece no log do container omni:
+
+```bash
+docker compose logs omni | grep "API Key"
 ```
 
 Copie e adicione ao `.env`:
@@ -156,7 +162,7 @@ Copie e adicione ao `.env`:
 OMNI_API_KEY=omni_xxxxxxxxxxxx
 ```
 
-### 3. Configurar WhatsApp e provider Genie
+### 4. Configurar WhatsApp e provider Genie
 
 ```bash
 ./scripts/setup-omni.sh
@@ -170,13 +176,13 @@ O script executa:
 4. Vincula o provider à instância
 5. Salva os IDs gerados no `.env`
 
-### 4. Subir o agente
+### 5. Subir o agente
 
 ```bash
-docker compose up genie --build
+docker compose up genie -d
 ```
 
-### 5. Testar
+### 6. Testar
 
 Envio mensagens sugeridas:
 
@@ -187,17 +193,47 @@ Envio mensagens sugeridas:
 
 ---
 
+## Setup alternativo (sem Docker)
+
+Para ambientes onde o Docker não está disponível, o Omni e o Genie oferecem instaladores nativos que configuram tudo via PM2.
+
+```bash
+# 1. Instalar Bun (runtime)
+curl -fsSL https://bun.sh/install | bash && source ~/.bashrc
+
+# 2. Instalar Omni (inclui NATS + Postgres + API via PM2)
+curl -fsSL https://raw.githubusercontent.com/automagik-dev/omni/main/install.sh | bash
+
+# 3. Instalar Genie
+curl -fsSL https://raw.githubusercontent.com/automagik-dev/genie/main/install.sh | bash
+
+# 4. Configurar WhatsApp
+./scripts/setup-omni.sh
+
+# 5. Iniciar agente (headless, sem tmux, executor SDK)
+GENIE_EXECUTOR=sdk \
+GENIE_NATS_URL=localhost:4222 \
+OMNI_API_URL=http://localhost:8882 \
+OMNI_API_KEY=<sua_key> \
+ANTHROPIC_API_KEY=<sua_key> \
+DATABASE_URL=postgresql://agent:agent@localhost:5432/agent \
+genie serve --headless
+```
+
+---
+
 ## Estrutura do projeto
 
 ```
 .
-|-- docker-compose.yml                  # Orquestração: nats + omni + agent-db + genie
+|-- docker-compose.yml                  # Orquestração: nats + omni-db + omni + agent-db + genie
 |-- docker/
-|   |-- omni/Dockerfile                 # Clona automagik-dev/omni
+|   |-- omni/
+|   |   `-- Dockerfile                  # @automagik/omni (servidor pre-compilado, sem pgserve)
 |   |-- genie/
-|   |   |-- Dockerfile                  # Bun + Genie + Postgres client + tools
-|   |   `-- entrypoint.sh               # Espera Postgres + genie serve --headless
-|   `-- agent-db/init.sql               # Schema inicial (auto-executado)
+|   |   |-- Dockerfile                  # @automagik/genie + gosu (usuario nao-root para pgserve)
+|   |   `-- entrypoint.sh               # chown + wait postgres + gosu genie serve --headless
+|   `-- agent-db/init.sql               # Schema Postgres: empresas + consultas_log
 |-- workspace/
 |   |-- .genie/workspace.json           # Marca workspace para o Genie
 |   `-- agents/assistente/

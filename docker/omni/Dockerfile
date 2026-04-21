@@ -1,7 +1,7 @@
 FROM oven/bun:latest
 
-# Instala o Omni CLI que inclui o servidor pre-compilado (dist/server/index.js)
-# Evita buildar o monorepo completo — o pacote publicado ja vem com tudo bundlado
+# Instala Omni via pacote publicado (inclui servidor pre-compilado)
+# Rodando como root e sem pgserve embutido — banco externo via DATABASE_URL
 RUN bun add -g @automagik/omni
 
 EXPOSE 8882
