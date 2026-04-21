@@ -2,8 +2,8 @@
   "name": "duedi",
   "agents": {
     "defaults": {
-      "provider": "claude-sdk",
-      "model": "claude-sonnet-4-5"
+      "provider": "claude",
+      "model": "sonnet"
     }
   }
 }

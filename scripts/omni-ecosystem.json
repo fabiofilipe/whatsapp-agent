@@ -1,0 +1,29 @@
+{
+  "apps": [
+    {
+      "name": "omni-nats",
+      "script": "/home/fabionote/desafio_tec_namastex/omni/bin/nats-server",
+      "args": "-p 4222 -js",
+      "autorestart": true,
+      "max_restarts": 0
+    },
+    {
+      "name": "omni-api",
+      "script": "/home/fabionote/.nvm/versions/node/v24.11.0/lib/node_modules/bun/bin/bun.exe",
+      "args": "/home/fabionote/.bun/install/global/node_modules/@automagik/omni/dist/server/index.js",
+      "autorestart": true,
+      "max_restarts": 10,
+      "env": {
+        "PGSERVE_EMBEDDED": "true",
+        "PGSERVE_PORT": "8432",
+        "PGSERVE_DATA": "/home/fabionote/desafio_tec_namastex/omni/.pgserve-data",
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:8432/omni",
+        "NATS_URL": "nats://localhost:4222",
+        "API_PORT": "8882",
+        "API_HOST": "0.0.0.0",
+        "NODE_ENV": "development",
+        "LOG_LEVEL": "info"
+      }
+    }
+  ]
+}

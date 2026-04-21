@@ -56,18 +56,13 @@ Documento de controle interno. Registra o que foi implementado, o que ainda falt
 
 ### Bloqueios ativos
 
-- [ ] **Docker Desktop com SIGBUS** — `docker compose build omni` crasha com `panic during panic / SIGBUS: bus error`. Causa: problema de montagem do VHDX no WSL2. Tentativas feitas: `wsl --shutdown`, `bun install --backend=copyfile`, `oven/bun:latest`. Nao resolvido.
-- [ ] **ANTHROPIC_API_KEY** — necessaria para o executor SDK do Genie. Sem ela o agente nao processa mensagens. Opcao gratuita identificada: executor `tmux` usa Claude Code CLI ja autenticado, mas requer Docker funcionando ou setup nativo.
+- [ ] **Cota/uso do Claude Code** — no modo nativo com `GENIE_EXECUTOR=tmux`, o pipeline chega a spawnar a sessao, mas pode falhar com erro explicito de cota, como `API Error: Extra usage is required for 1M context`.
+- [ ] **Ajuste fino da resposta end-to-end** — Omni e Genie ja estao integrados localmente; falta validar resposta completa no WhatsApp assim que a cota do Claude voltar.
 
 ### Implementacao pendente
 
-- [ ] **Build dos containers** — bloqueado pelo Docker Desktop
-- [ ] **Conexao WhatsApp via QR** — depende do build do Omni
-- [ ] **Teste end-to-end** — depende dos dois itens acima
-- [ ] **Dois modos de execucao (dev/prod)** — plano definido, nao implementado:
-  - `docker-compose.infra.yml` para desenvolvimento (sem genie, agent-db com porta 5432 exposta)
-  - `scripts/start-dev.sh` para rodar Genie nativo no WSL2 com executor tmux
-  - Secao no README documentando ambos os modos
+- [ ] **Teste end-to-end apos retorno da cota** — mandar mensagem nova no WhatsApp e confirmar resposta do agente
+- [x] **Modo nativo com executor tmux** — configurado em `workspace/` e documentado em `scripts/start-genie-local.sh`
 - [ ] **Testes automatizados** — nao implementado
 
 ### Melhorias identificadas mas nao prioritarias
@@ -83,26 +78,21 @@ Documento de controle interno. Registra o que foi implementado, o que ainda falt
 
 | Item | Situacao | Acao necessaria |
 |------|----------|-----------------|
-| Docker SIGBUS | Ativo | Reinstalar Docker Desktop ou usar maquina Linux pura |
-| ANTHROPIC_API_KEY | Pendente | Criar conta em console.anthropic.com (creditos gratuitos em contas novas) ou usar executor tmux |
-| WhatsApp para testes | Pendente | Numero disponivel, aguarda Docker funcionar |
-| Dois modos de execucao | Planejado | Implementar apos Docker resolver |
+| Claude Code sem cota | Ativo | Esperar renovacao de uso / ajustar contexto do modelo se necessario |
+| WhatsApp para testes | Disponivel | Repetir teste assim que a cota voltar |
+| Dois modos de execucao | Parcial | Docker continua opcional; modo nativo ja documentado |
 | Testes automatizados | Nao iniciado | Implementar se sobrar tempo |
 
 ---
 
 ## Proximos passos em ordem de prioridade
 
-1. Resolver Docker Desktop (SIGBUS/VHDX)
-2. Obter ANTHROPIC_API_KEY
-3. `docker compose build` completo
-4. `docker compose up nats omni agent-db`
-5. `./scripts/setup-omni.sh` — conectar WhatsApp
-6. `docker compose up genie`
-7. Teste end-to-end com mensagem real
-8. Implementar dois modos (dev/prod)
-9. Testes automatizados
-10. Commit final
+1. Esperar retorno da cota do Claude Code
+2. Rodar `./scripts/start-genie-local.sh`
+3. Mandar mensagem nova no WhatsApp
+4. Validar resposta no `genie-local.log` e no chat
+5. Se houver erro novo, corrigir o fluxo final
+6. Implementar testes automatizados
 
 ---
 

@@ -1,295 +1,299 @@
 # DueDi — Agente de Due Diligence Empresarial via WhatsApp
 
-Implementei um agente conversacional de inteligência comercial B2B que consulta CNPJ, avalia risco e gerencia um pipeline de empresas — tudo operado por WhatsApp. A stack integra **Claude SDK** (modelo), **Genie** (orquestrador de agente), **Omni** (bridge de canal WhatsApp via Baileys) e **Postgres** (persistência), com toda a execução containerizada via Docker.
+Agente conversacional de inteligência comercial B2B que consulta CNPJ, avalia risco e gerencia um pipeline de empresas operado por WhatsApp. A stack integra **Claude Code** (assinatura local via tmux), **Genie** (orquestrador), **Omni** (bridge WhatsApp/Baileys) e **Postgres** (persistência via pgserve embedado do Genie).
 
 ---
 
-## Propósito e visão de produto
+## Propósito
 
-Identifiquei que todo profissional brasileiro que negocia B2B — vendedor, comprador, analista de crédito, terceirizador — precisa validar empresas antes de fechar negócio. Hoje esse fluxo é manual, exige consultar 4 ou 5 sites diferentes (BrasilAPI, Receita, ConsultaCNPJ, JusBrasil), e leva em média 30 minutos por empresa.
+Todo profissional brasileiro que negocia B2B precisa validar empresas antes de fechar negócio. O processo é manual, exige consultar vários sites e leva ~30 minutos por empresa. O DueDi resolve isso em segundos, dentro do WhatsApp.
 
-Projetei o DueDi para resolver isso em torno de 10 segundos, dentro do canal que o profissional brasileiro já usa no dia a dia (WhatsApp).
-
-Exemplo real de interação que construí:
+Exemplo de interação:
 
 ```
 Usuário: 47960950000121
 
 DueDi:
-MAGAZINE LUIZA S/A (MAGAZINE LUIZA)
+📋 MAGAZINE LUIZA S/A (Magazine Luiza)
 CNPJ: 47.960.950/0001-21
-Score de risco: 95/100 (BAIXO)
+✅ Score de risco: 95/100 (BAIXO)
 
 Perfil
-- Situação: ATIVA
-- Porte: DEMAIS
-- Natureza: Sociedade Anônima Aberta
-- Fundada em: 1966-10-24 (59 anos)
-- Capital social: R$ 14.202.162.000
-- Regime: Lucro Real
-- Atividade: Lojas de departamentos
-- Localização: Franca/SP
+• Situação: ATIVA
+• Porte: DEMAIS
+• Fundada em: 1966-10-24 (59 anos)
+• Capital social: R$ 14.202.162.000
+• Regime: Lucro Real
 
-Sócios (top 3)
-- FREDERICO TRAJANO INACIO RODRIGUES — Presidente
-- FABRICIO BITTAR GARCIA — Diretor
-- ANDRE LUIZ DE SOUZA FATALA — Diretor
-
-Análise: empresa consolidada, ativa há 59 anos,
-capital social robusto. Perfil de baixo risco.
+Análise: empresa consolidada, ativa há 59 anos, capital robusto. Baixo risco.
 
 Quer marcar como aprovada, rejeitada ou em análise?
 ```
-
-O histórico fica persistido — o usuário pode listar empresas por status, alterar classificações e adicionar observações por empresa, tudo via conversa.
-
-Posicionei o produto como um CRM conversacional focado em B2B brasileiro. A proposta é democratizar inteligência comercial — o que grandes empresas pagam consultorias para fazer (KYC, KYB, homologação de fornecedores), qualquer profissional passa a ter no bolso.
 
 ---
 
 ## Arquitetura
 
 ```
-WhatsApp (usuário)
-    |
-    v
-Omni — bridge de canal (Baileys)
-    | publica NATS: omni.message.{instance}.{chat}
-    v
-Genie — orquestrador (Claude SDK executor)
-    | spawna sessão Claude
-    v
-Claude — interpreta intenção e chama tools via Bash
-    |
-    v
-Tools TypeScript (bun)
-    |-- consultar-cnpj.ts  -> BrasilAPI + Postgres
-    |-- marcar-empresa.ts  -> Postgres
-    |-- listar-empresas.ts -> Postgres
-    |
-    v
-Claude formata resposta para WhatsApp
-    | publica NATS: omni.reply.{instance}.{chat}
-    v
-Omni entrega a resposta
-    |
-    v
-WhatsApp (usuário)
+WhatsApp → Omni (Baileys) → NATS (omni.message.{instance}.{chat})
+        → Genie (OmniBridge) → Claude Code (tmux session)
+        → Bash tools (bun) → BrasilAPI + Postgres
+        → NATS (omni.reply.{instance}.{chat}) → Omni → WhatsApp
 ```
 
-### Decisões arquiteturais principais
+**Decisões principais:**
 
-Tomei as seguintes decisões com base na leitura do código-fonte do Genie e do Omni:
-
-1. **SDK executor no Genie** (`GENIE_EXECUTOR=sdk`). Optei por não usar o executor tmux porque ele exigiria setup adicional dentro do container e não traz benefício para meu caso de uso. O SDK executor roda o Claude em processo e dispensa qualquer terminal multiplexer.
-
-2. **Provider `nats-genie` no Omni**. Em vez de construir um webhook HTTP intermediário, usei o provider nativo disponível em `packages/core/src/providers/nats-genie-provider.ts`. A mensagem flui via pub/sub no NATS em tempo real, sem polling, sem overhead HTTP, e com garantias de entrega do JetStream.
-
-3. **Tools como processos isolados**. Cada chamada do Claude spawna um processo Bun novo que abre a conexão Postgres, executa a query e fecha. Simplifica o modelo mental (cada tool é idempotente, sem estado compartilhado), evita conexões penduradas, e facilita o debug (basta rodar `bun tools/consultar-cnpj.ts ...` fora do agente).
-
-4. **Postgres dedicado para o agente**. Separei o banco do agente do Postgres embedado do Omni. Evita acoplamento cruzado, permite backup independente, e isola o domínio de negócio da infraestrutura de mensageria.
-
-5. **Upsert por `(chat_id, cnpj)`**. Cada usuário tem seu próprio pipeline. O isolamento é natural a partir da chave composta, sem precisar implementar multi-tenancy complexo. Um usuário não vê as empresas de outro.
-
-6. **Validação de CNPJ com dígitos verificadores**. O review inicial do código detectou que `replace(/\D/g, '') && length === 14` aceita lixo como `"00000000000000"`. Implementei o algoritmo oficial dos dígitos verificadores em `tools/helpers.ts` para rejeitar entradas inválidas antes de queimar rate limit da BrasilAPI.
+- **Executor `tmux`** — Genie spawna Claude Code autenticado localmente. Sem `ANTHROPIC_API_KEY`, usa assinatura Claude Code.
+- **Provider `nats-genie`** — integração nativa Omni→Genie via NATS pub/sub, sem polling.
+- **Tools como processos isolados** — cada tool é um processo Bun independente, simples de debugar.
+- **Postgres via pgserve embedado** — Genie já sobe um Postgres interno (porta 19642). O banco do agente fica no mesmo pgserve, sem infraestrutura extra.
 
 ---
 
-## Ferramentas do agente
+## Pré-requisitos
 
-| Tool | O que faz | Fonte de dados |
-|------|-----------|----------------|
-| `consultar-cnpj` | Busca dados cadastrais completos, calcula risk score (0-100), persiste no banco e loga a consulta | [BrasilAPI](https://brasilapi.com.br/docs) — gratuita, sem chave |
-| `marcar-empresa` | Atualiza status (`em_analise` / `aprovada` / `rejeitada`) e observações da empresa | Postgres local |
-| `listar-empresas` | Lista empresas consultadas com filtro por status e contadores agregados | Postgres local |
+- [Bun](https://bun.sh) instalado
+- [Omni](https://github.com/automagik-dev/omni) instalado globalmente (`omni` no PATH)
+- [Genie](https://github.com/automagik-dev/genie) instalado globalmente (`genie` no PATH)
+- [Claude Code](https://claude.ai/code) autenticado localmente (`claude` no PATH)
+- `tmux` instalado
+- `python3` instalado (bridge de fallback)
 
-### Algoritmo de score de risco
-
-Implementei uma heurística transparente e explicável em `tools/risk.ts` baseada em seis fatores:
-
-1. **Situação cadastral** — ATIVA acrescenta 20 ao score; outras (BAIXADA, SUSPENSA, INAPTA) subtraem 40 e geram flag visível.
-2. **Idade da empresa** — 10+ anos adiciona 15, 5+ anos adiciona 8, menos de 1 ano subtrai 15 e gera flag.
-3. **Capital social** — acima de R$ 1M adiciona 10, abaixo de R$ 1k subtrai 5 e gera flag.
-4. **Coerência porte × capital** — gera flag se porte "DEMAIS" vier com capital social abaixo de R$ 100k.
-5. **Motivo de situação cadastral** — qualquer motivo diferente de "SEM MOTIVO" gera flag.
-6. **QSA vazio** — sem sócios declarados gera flag e subtrai 5.
-
-O score final é normalizado no intervalo 0-100 e mapeado para uma classificação textual (BAIXO, MÉDIO, ALTO, CRÍTICO). Escolhi heurística em vez de ML para manter o processo auditável e simples de evoluir — adicionar um fator novo é uma linha de código.
-
----
-
-## Setup
-
-### Pré-requisitos
-
-- Docker + Docker Compose
-- Um número de WhatsApp para conectar via QR code
-- Uma chave da API Anthropic ([console.anthropic.com](https://console.anthropic.com/settings/keys))
-
-### 1. Variáveis de ambiente
+Instalação dos CLIs:
 
 ```bash
+curl -fsSL https://bun.sh/install | bash && source ~/.bashrc
+curl -fsSL https://raw.githubusercontent.com/automagik-dev/omni/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/automagik-dev/genie/main/install.sh | bash
+```
+
+---
+
+## Setup completo (modo nativo)
+
+### 1. Clonar e configurar
+
+```bash
+git clone https://github.com/fabiofilipe/whatsapp-agent
+cd whatsapp-agent
 cp .env.example .env
 ```
 
-No `.env`, preencha:
-- `ANTHROPIC_API_KEY` — sua chave da Anthropic
-- `AGENT_DB_PASSWORD` e `OMNI_DB_PASSWORD` — opcionais; use senhas fortes em produção
-
-### 2. Build
+### 2. Iniciar NATS + Omni via PM2
 
 ```bash
-docker compose build
+# Baixar o binário do NATS (salvo em omni/bin/)
+cd /caminho/para/omni && bash scripts/ensure-nats.sh && cd -
+
+# Iniciar NATS e Omni API via PM2
+pm2 start scripts/omni-ecosystem.json
 ```
 
-### 3. Subir infraestrutura base
+O arquivo `scripts/omni-ecosystem.json` já está configurado com os paths e variáveis corretos.
+
+Aguarde ~20 segundos e confirme que a API está saudável:
 
 ```bash
-docker compose up nats omni-db omni agent-db -d
+curl http://localhost:8882/api/v2/health
 ```
 
-Aguarde cerca de 30 segundos. A `OMNI_API_KEY` aparece no log do container omni:
+A API Key aparece nos logs do PM2:
 
 ```bash
-docker compose logs omni | grep "API Key"
+pm2 logs omni-api --lines 30 | grep "API Key"
 ```
 
-Copie e adicione ao `.env`:
+Copie a chave e salve no `.env`:
 
 ```
-OMNI_API_KEY=omni_xxxxxxxxxxxx
+OMNI_API_KEY=omni_sk_xxxxxxxxxxxx
 ```
 
-### 4. Configurar WhatsApp e provider Genie
+Atualize também o config do CLI:
 
 ```bash
-./scripts/setup-omni.sh
+omni config set apiKey omni_sk_xxxxxxxxxxxx
 ```
 
-O script executa:
-
-1. Cria a instância WhatsApp no Omni
-2. Instrui como escanear o QR code
-3. Cria o provider `nats-genie` (ponte Omni para Genie)
-4. Vincula o provider à instância
-5. Salva os IDs gerados no `.env`
-
-### 5. Subir o agente
+### 3. Conectar WhatsApp (pairing code — sem QR)
 
 ```bash
-docker compose up genie -d
+# Criar instância
+INSTANCE=$(curl -s -X POST http://localhost:8882/api/v2/instances \
+  -H "x-api-key: $OMNI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"duedi","channel":"whatsapp-baileys"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
+
+echo "Instance ID: $INSTANCE"
+
+# Iniciar conexão
+curl -s -X POST "http://localhost:8882/api/v2/instances/$INSTANCE/connect" \
+  -H "x-api-key: $OMNI_API_KEY" -H "Content-Type: application/json" \
+  -d '{"phoneNumber":"55XXXXXXXXXXX"}'
+
+# Solicitar pairing code (substitua pelo número do WhatsApp, com DDI+DDD)
+curl -s -X POST "http://localhost:8882/api/v2/instances/$INSTANCE/pair" \
+  -H "x-api-key: $OMNI_API_KEY" -H "Content-Type: application/json" \
+  -d '{"phoneNumber":"55XXXXXXXXXXX"}'
 ```
 
-### 6. Testar
+O código de 8 caracteres retornado deve ser inserido no WhatsApp:
+**Configurações → Dispositivos conectados → Conectar dispositivo → Conectar com número de telefone**
 
-Envio mensagens sugeridas:
+Salve o instance ID no `.env`:
 
-- `"oi"` — apresentação do DueDi
-- `47960950000121` — consulta Magazine Luiza (dado real)
-- `"marca essa como aprovada"` — atualiza status
-- `"me lista minhas empresas"` — resumo do pipeline
+```
+OMNI_INSTANCE_ID=<id retornado>
+OMNI_API_URL=http://localhost:8882
+```
+
+### 4. Vincular Genie ao WhatsApp
+
+```bash
+omni connect $INSTANCE assistente --nats-url localhost:4222
+```
+
+Este comando cria o provider `nats-genie`, registra o agente e configura o roteamento automaticamente.
+
+### 5. Criar banco do agente
+
+O Genie sobe um Postgres embedado (pgserve) na porta 19642 com credenciais `postgres:postgres`. O banco do agente vive neste mesmo pgserve:
+
+```bash
+# Criar database
+bun -e "const {default: pg} = await import('postgres'); const sql = pg('postgresql://postgres:postgres@localhost:19642/postgres'); await sql\`CREATE DATABASE agent\`; await sql.end();"
+
+# Criar schema
+bun -e "
+const {default: pg} = await import('postgres');
+const fs = await import('fs');
+const sql = pg('postgresql://postgres:postgres@localhost:19642/agent');
+await sql.unsafe(fs.readFileSync('docker/agent-db/init.sql', 'utf8'));
+await sql.end();
+console.log('schema criado');
+"
+```
+
+> **Nota:** O pgserve só está disponível depois que o Genie for iniciado ao menos uma vez. Se ainda não rodou, execute `genie serve --headless` uma vez para ele inicializar, depois mate e refaça.
+
+### 6. Iniciar o Genie
+
+```bash
+./scripts/start-genie-local.sh
+```
+
+O script:
+- Exporta `PATH` com localização de `genie`, `claude` e `bun`
+- Aponta `DATABASE_URL` para `postgresql://postgres:postgres@localhost:19642/agent`
+- Força `GENIE_EXECUTOR=tmux`
+- Grava logs em `genie-local.log`
+- Falha cedo se `claude`, `genie`, `tmux` ou NATS não estiverem prontos
+
+### 7. Testar
+
+Envie mensagens pelo WhatsApp conectado:
+
+- `oi` — apresentação do DueDi
+- `47960950000121` — consulta Magazine Luiza
+- `marca como aprovada` — atualiza status da última empresa
+- `lista minhas empresas` — resumo do pipeline
 
 ---
 
-## Setup alternativo (sem Docker)
-
-Para ambientes onde o Docker não está disponível, o Omni e o Genie oferecem instaladores nativos que configuram tudo via PM2.
+## Reiniciar após reboot
 
 ```bash
-# 1. Instalar Bun (runtime)
-curl -fsSL https://bun.sh/install | bash && source ~/.bashrc
+# 1. NATS + Omni
+pm2 start scripts/omni-ecosystem.json
 
-# 2. Instalar Omni (inclui NATS + Postgres + API via PM2)
-curl -fsSL https://raw.githubusercontent.com/automagik-dev/omni/main/install.sh | bash
+# 2. Aguardar API (~20s) e confirmar
+curl http://localhost:8882/api/v2/health
 
-# 3. Instalar Genie
-curl -fsSL https://raw.githubusercontent.com/automagik-dev/genie/main/install.sh | bash
-
-# 4. Configurar WhatsApp
-./scripts/setup-omni.sh
-
-# 5. Iniciar agente (headless, sem tmux, executor SDK)
-GENIE_EXECUTOR=sdk \
-GENIE_NATS_URL=localhost:4222 \
-OMNI_API_URL=http://localhost:8882 \
-OMNI_API_KEY=<sua_key> \
-ANTHROPIC_API_KEY=<sua_key> \
-DATABASE_URL=postgresql://agent:agent@localhost:5432/agent \
-genie serve --headless
+# 3. Genie
+./scripts/start-genie-local.sh
 ```
+
+O WhatsApp permanece conectado entre reinicializações (sessão salva no pgserve do Omni).
 
 ---
 
-## Estrutura do projeto
+## Estrutura
 
 ```
 .
-|-- docker-compose.yml                  # Orquestração: nats + omni-db + omni + agent-db + genie
-|-- docker/
-|   |-- omni/
-|   |   `-- Dockerfile                  # @automagik/omni (servidor pre-compilado, sem pgserve)
-|   |-- genie/
-|   |   |-- Dockerfile                  # @automagik/genie + gosu (usuario nao-root para pgserve)
-|   |   `-- entrypoint.sh               # chown + wait postgres + gosu genie serve --headless
-|   `-- agent-db/init.sql               # Schema Postgres: empresas + consultas_log
-|-- workspace/
-|   |-- .genie/workspace.json           # Marca workspace para o Genie
-|   `-- agents/assistente/
-|       `-- AGENTS.md                   # System prompt + configuração do agente
-|-- tools/                              # Ferramentas TypeScript (Bun)
-|   |-- package.json
-|   |-- tsconfig.json
-|   |-- types.ts                        # Tipos derivados da BrasilAPI
-|   |-- db.ts                           # Cliente Postgres (postgres.js)
-|   |-- risk.ts                         # Algoritmo de score de risco
-|   |-- helpers.ts                      # Validação CNPJ, fetch com retry, emit JSON
-|   |-- consultar-cnpj.ts               # Tool 1
-|   |-- marcar-empresa.ts               # Tool 2
-|   `-- listar-empresas.ts              # Tool 3
-|-- scripts/
-|   `-- setup-omni.sh                   # Configura Omni pós-boot (QR + provider)
-|-- .env.example
-`-- README.md
+├── docker-compose.yml              # Orquestração containerizada (opcional)
+├── docker/
+│   ├── omni/Dockerfile
+│   ├── genie/Dockerfile + entrypoint.sh
+│   └── agent-db/init.sql           # Schema: tabelas empresas + consultas_log
+├── workspace/
+│   ├── .genie/workspace.json       # Marca workspace para o Genie
+│   └── agents/assistente/AGENTS.md # System prompt do agente DueDi
+├── tools/                          # Ferramentas TypeScript (Bun)
+│   ├── types.ts                    # Tipos derivados da BrasilAPI (resposta real)
+│   ├── db.ts                       # Cliente Postgres
+│   ├── risk.ts                     # Score de risco (0-100), 6 fatores
+│   ├── helpers.ts                  # Validação CNPJ, fetch retry
+│   ├── consultar-cnpj.ts           # BrasilAPI + upsert Postgres
+│   ├── marcar-empresa.ts           # Update status/observações
+│   └── listar-empresas.ts          # Listagem com filtros
+└── scripts/
+    ├── omni-ecosystem.json         # PM2: NATS + Omni API
+    ├── start-genie-local.sh        # Sobe Genie no workspace correto
+    └── bridge_omni_genie_local.py  # Bridge de fallback (Omni→NATS polling)
 ```
 
 ---
 
-## Variáveis de ambiente
+## Variáveis de ambiente (.env)
 
 | Variável | Obrigatório | Descrição |
 |----------|-------------|-----------|
-| `ANTHROPIC_API_KEY` | sim | Chave da API Anthropic |
 | `OMNI_API_KEY` | sim | Gerada no primeiro boot do Omni |
-| `AGENT_DB_PASSWORD` | não | Senha do Postgres do agente (default `agent`) |
-| `OMNI_INSTANCE_ID` | auto | Preenchido pelo `setup-omni.sh` |
-| `OMNI_PROVIDER_ID` | auto | Preenchido pelo `setup-omni.sh` |
+| `OMNI_INSTANCE_ID` | sim | ID da instância WhatsApp criada |
+| `OMNI_API_URL` | não | Default: `http://localhost:8882` |
+| `AGENT_DB_PASSWORD` | não | Não usado no modo nativo (pgserve usa postgres:postgres) |
+| `ANTHROPIC_API_KEY` | não | Apenas para executor `sdk`; modo nativo usa Claude Code local |
 
 ---
 
-## Qualidade de código
+## Tools
 
-Apliquei os seguintes padrões ao longo da implementação:
+Cada tool é um processo Bun independente chamado pelo Claude via Bash:
 
-- **TypeScript estrito** com `strict: true` no `tsconfig.json`
-- **Tipos derivados da API real** — antes de escrever as tools, validei o schema da BrasilAPI fazendo uma requisição direta com `curl` contra o CNPJ da Magazine Luiza (47960950000121) e derivei os tipos do JSON retornado. Evitei tipagem baseada em documentação desatualizada.
-- **Validação de CNPJ** com cálculo dos dois dígitos verificadores
-- **Fetch com retry** — backoff exponencial curto em respostas 5xx da BrasilAPI
-- **Tratamento uniforme de erros** — todas as tools emitem JSON em stdout e usam exit code != 0 para sinalizar falha; stderr fica reservado para logs humanos
-- **SQL parametrizado** via tagged templates do `postgres.js` (imune a injection)
-- **Code review automatizado** — submeti as tools a um agente revisor especializado antes do commit final e corrigi todos os problemas classificados como críticos (🔴) e altos (🟠)
+```bash
+# Consultar CNPJ
+bun tools/consultar-cnpj.ts <chat_id> <cnpj>
+
+# Marcar empresa
+bun tools/marcar-empresa.ts <chat_id> <cnpj> <status> [observacoes]
+# status: em_analise | aprovada | rejeitada
+
+# Listar empresas
+bun tools/listar-empresas.ts <chat_id> [status]
+```
+
+Todas emitem JSON em stdout e usam exit code != 0 para sinalizar erro.
 
 ---
 
-## Roadmap
+## Score de risco
 
-O MVP entregue cobre o ciclo completo consultar → classificar → gerenciar. Listei os próximos passos naturais de evolução do produto:
+Heurística transparente com 6 fatores em `tools/risk.ts`:
 
-- **Watch list**: monitorar empresas periodicamente e alertar mudanças (endereço, sócios, situação cadastral)
-- **Análise de rede societária**: detectar grupos econômicos cruzando sócios entre empresas consultadas pelo mesmo usuário
-- **Score customizável**: permitir pesos ajustáveis por setor ou por regra do usuário
-- **Enriquecimento externo**: cruzar com CEPIM, CNEP e Lista de Inidôneos do TCU
-- **Benchmarking setorial**: comparar empresa X com peers do mesmo CNAE e região
-- **Exportar pipeline**: gerar CSV ou PDF do histórico para relatórios comerciais
+| Fator | Impacto |
+|-------|---------|
+| Situação ATIVA | +20 |
+| Situação irregular | -40 + flag |
+| Empresa > 10 anos | +15 |
+| Empresa < 1 ano | -15 + flag |
+| Capital > R$ 1M | +10 |
+| Capital < R$ 1k | -5 + flag |
+| Porte × capital inconsistente | flag |
+| Motivo de situação declarado | flag |
+| Sem sócios (QSA vazio) | -5 + flag |
+
+Score normalizado 0-100: BAIXO (≥70) / MÉDIO (≥50) / ALTO (≥30) / CRÍTICO (<30).
 
 ---
 
