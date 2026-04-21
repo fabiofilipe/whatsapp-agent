@@ -1,0 +1,12 @@
+{
+  "name": "@agent/tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "postgres": "^3.4.8"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.42"
+  }
+}
