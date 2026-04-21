@@ -1,4 +1,4 @@
-FROM oven/bun:1.1.42-slim
+FROM oven/bun:latest
 
 RUN apt-get update && apt-get install -y \
     git curl jq postgresql-client \

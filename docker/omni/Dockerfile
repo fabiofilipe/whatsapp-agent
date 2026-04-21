@@ -1,14 +1,9 @@
-FROM oven/bun:1.1.42-slim
+FROM oven/bun:latest
 
-RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-# Clona Omni na versão estável
-RUN git clone --depth 1 https://github.com/automagik-dev/omni.git .
-
-RUN bun install --frozen-lockfile
+# Instala o Omni CLI que inclui o servidor pre-compilado (dist/server/index.js)
+# Evita buildar o monorepo completo — o pacote publicado ja vem com tudo bundlado
+RUN bun add -g @automagik/omni
 
 EXPOSE 8882
 
-CMD ["bun", "packages/api/src/index.ts"]
+CMD ["bun", "/root/.bun/install/global/node_modules/@automagik/omni/dist/server/index.js"]
