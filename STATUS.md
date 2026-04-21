@@ -68,7 +68,7 @@ Documento de controle interno. Registra o que foi implementado, o que ainda falt
   - `docker-compose.infra.yml` para desenvolvimento (sem genie, agent-db com porta 5432 exposta)
   - `scripts/start-dev.sh` para rodar Genie nativo no WSL2 com executor tmux
   - Secao no README documentando ambos os modos
-- [ ] **Testes automatizados** — diferencial listado no desafio, nao implementado
+- [ ] **Testes automatizados** — nao implementado
 
 ### Melhorias identificadas mas nao prioritarias
 

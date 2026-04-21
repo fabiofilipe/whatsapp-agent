@@ -1,7 +1,5 @@
 # DueDi — Agente de Due Diligence Empresarial via WhatsApp
 
-Projeto desenvolvido como entrega do desafio técnico da Namastex Labs para a vaga de AI Engineer.
-
 Implementei um agente conversacional de inteligência comercial B2B que consulta CNPJ, avalia risco e gerencia um pipeline de empresas — tudo operado por WhatsApp. A stack integra **Claude SDK** (modelo), **Genie** (orquestrador de agente), **Omni** (bridge de canal WhatsApp via Baileys) e **Postgres** (persistência), com toda a execução containerizada via Docker.
 
 ---
@@ -85,7 +83,7 @@ Tomei as seguintes decisões com base na leitura do código-fonte do Genie e do 
 
 1. **SDK executor no Genie** (`GENIE_EXECUTOR=sdk`). Optei por não usar o executor tmux porque ele exigiria setup adicional dentro do container e não traz benefício para meu caso de uso. O SDK executor roda o Claude em processo e dispensa qualquer terminal multiplexer.
 
-2. **Provider `nats-genie` no Omni**. Em vez de construir um webhook HTTP intermediário, usei o provider nativo que a Namastex já implementou em `packages/core/src/providers/nats-genie-provider.ts`. A mensagem flui via pub/sub no NATS em tempo real, sem polling, sem overhead HTTP, e com garantias de entrega do JetStream.
+2. **Provider `nats-genie` no Omni**. Em vez de construir um webhook HTTP intermediário, usei o provider nativo disponível em `packages/core/src/providers/nats-genie-provider.ts`. A mensagem flui via pub/sub no NATS em tempo real, sem polling, sem overhead HTTP, e com garantias de entrega do JetStream.
 
 3. **Tools como processos isolados**. Cada chamada do Claude spawna um processo Bun novo que abre a conexão Postgres, executa a query e fecha. Simplifica o modelo mental (cada tool é idempotente, sem estado compartilhado), evita conexões penduradas, e facilita o debug (basta rodar `bun tools/consultar-cnpj.ts ...` fora do agente).
 
