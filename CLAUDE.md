@@ -1,108 +1,114 @@
 # DueDi — Agente de Due Diligence Empresarial
 
 Agente conversacional no WhatsApp para inteligência comercial B2B.
-Stack: Genie (orquestrador) + Omni (bridge WhatsApp) + BrasilAPI + Postgres.
+Stack: Genie (orquestrador) + Omni (bridge WhatsApp) + Claude Code nativo (via tmux) + BrasilAPI + Postgres (pgserve embedado do Genie).
+
+## Modos de execução
+
+Dois caminhos suportados, escolha um:
+
+1. **Nativo (default, validado)** — Genie, Omni, NATS e Claude Code rodam direto na máquina. Usa o pgserve embedado do Genie na porta `19642`. É o fluxo documentado no README.
+2. **Docker (stretch goal, não validado end-to-end)** — `docker-compose.yml` com containers separados para NATS, Omni, agent-db e Genie. Pode servir como referência de arquitetura, mas tem arestas (entrypoint do omni não integrado ao Dockerfile; comando de QR em `setup-omni.sh` aponta para caminho do monorepo que não existe na imagem publicada). Se for usar, trate como experimental.
 
 ## Estrutura do projeto
 
 ```
-docker-compose.yml          # nats + omni-db + omni + agent-db + genie
+docker-compose.yml          # stretch goal — ver seção acima
 docker/
-  omni/Dockerfile           # bun add -g @automagik/omni + servidor pre-compilado
+  omni/Dockerfile           # bun add -g @automagik/omni
   genie/
-    Dockerfile              # bun add -g @automagik/genie + gosu para usuario nao-root
+    Dockerfile              # bun add -g @automagik/genie + gosu
     entrypoint.sh           # chown /home/genie → gosu genie → genie serve --headless
-  agent-db/init.sql         # schema Postgres: tabelas empresas + consultas_log
+  agent-db/init.sql         # schema Postgres: empresas + consultas_log
 workspace/
   .genie/workspace.json     # workspace marker (name: duedi)
   agents/assistente/
-    AGENTS.md               # system prompt do agente DueDi
+    AGENTS.md               # system prompt do agente DueDi (escopo rígido + confidencialidade)
 tools/                      # ferramentas TypeScript (Bun)
   types.ts                  # tipos BrasilAPI derivados de resposta real
   db.ts                     # cliente Postgres via postgres.js
-  risk.ts                   # algoritmo de score de risco (0-100)
-  helpers.ts                # validacao CNPJ, fetch retry, emit JSON
+  risk.ts                   # score de risco (0-100) — heurística transparente
+  helpers.ts                # validação CNPJ c/ dígito, fetch retry, emit JSON
   consultar-cnpj.ts         # tool 1: BrasilAPI + upsert Postgres
-  marcar-empresa.ts         # tool 2: update status/observacoes
+  marcar-empresa.ts         # tool 2: update status/observações
   listar-empresas.ts        # tool 3: listagem com filtros
-  package.json / tsconfig.json
 scripts/
-  setup-omni.sh             # cria instancia WhatsApp + provider nats-genie
+  start-genie-local.sh      # modo nativo: Genie com executor tmux + Claude Code local
+  omni-ecosystem.json       # PM2: NATS + Omni API
+  setup-omni.sh             # legado docker — não usar no modo nativo
+  bridge_omni_genie_local.py # fallback (polling Omni→NATS) — inativo; provider nats-genie é o oficial
+tests/                      # 5 suites: helpers, risk, db, edge-cases, integration
 ```
 
-## Comandos essenciais
+## Comandos essenciais (modo nativo)
 
 ```bash
-# Build completo
-docker compose build
+# Pré-requisitos: omni, genie, claude, tmux, bun no PATH. Ver README.
 
-# Subir infraestrutura (primeira vez)
-docker compose up nats omni-db omni agent-db -d
+# 1. Subir NATS + Omni via PM2
+pm2 start scripts/omni-ecosystem.json
 
-# Pegar OMNI_API_KEY do log e colocar no .env
-docker compose logs omni | grep "API Key"
+# 2. Conectar WhatsApp e vincular Genie (uma vez)
+# Ver README §3-4 (pairing code + omni connect <instance> assistente)
 
-# Configurar WhatsApp (QR code)
-./scripts/setup-omni.sh
+# 3. Subir Genie com executor tmux
+./scripts/start-genie-local.sh
 
-# Subir agente
-docker compose up genie -d
+# 4. Rodar testes
+bun test tests/
 
 # Logs em tempo real
-docker compose logs -f genie
-docker compose logs -f omni
+tail -f genie-local.log
+pm2 logs omni-api
 ```
 
-## Variaveis de ambiente (.env)
+## Variáveis de ambiente (.env)
 
-| Variavel | Descricao |
-|----------|-----------|
-| `ANTHROPIC_API_KEY` | API key da Anthropic (obrigatorio) |
-| `OMNI_API_KEY` | Gerada no primeiro boot do Omni |
-| `AGENT_DB_PASSWORD` | Senha do Postgres do agente (default: agent) |
-| `OMNI_DB_PASSWORD` | Senha do Postgres do Omni (default: omni) |
+| Variável | Obrigatório | Descrição |
+|----------|-------------|-----------|
+| `OMNI_API_KEY` | sim | Gerada no primeiro boot do Omni |
+| `OMNI_INSTANCE_ID` | sim | ID da instância WhatsApp criada via API |
+| `OMNI_API_URL` | não | Default: `http://localhost:8882` |
+| `ANTHROPIC_API_KEY` | não | Apenas para executor `sdk`; modo nativo usa assinatura local do Claude Code |
+| `AGENT_DB_PASSWORD` / `OMNI_DB_PASSWORD` | não | Só para o caminho docker |
 
 ## Tools TypeScript
 
-Executadas pelo Claude via Bash tool. Cada tool e um processo Bun independente.
+Executadas pelo Claude via Bash tool. Cada tool é um processo Bun independente, emite JSON em stdout e usa exit code ≠ 0 para erros.
 
 ```bash
-# Dentro do container genie ou com DATABASE_URL setado:
-bun /tools/consultar-cnpj.ts <chat_id> <cnpj>
-bun /tools/marcar-empresa.ts <chat_id> <cnpj> <status> [observacoes]
-bun /tools/listar-empresas.ts <chat_id> [status]
+bun tools/consultar-cnpj.ts <chat_id> <cnpj>
+bun tools/marcar-empresa.ts <chat_id> <cnpj> <status> [observacoes]
+bun tools/listar-empresas.ts <chat_id> [status]
 ```
 
-## Schema Postgres (agent-db)
+No modo nativo o DB é o pgserve do Genie: `postgresql://postgres:postgres@localhost:19642/agent`.
 
-```sql
--- empresas: pipeline de due diligence por usuario (chat_id)
--- consultas_log: historico de chamadas a BrasilAPI
-```
+## Schema Postgres
 
-Ver `docker/agent-db/init.sql` para schema completo.
+Tabelas `empresas` (PK: `chat_id, cnpj`) e `consultas_log`. Ver `docker/agent-db/init.sql`.
 
-## Fluxo de integracao
+Isolamento por `chat_id`: cada usuário do WhatsApp tem seu pipeline próprio, sem vazamento cruzado.
+
+## Fluxo de integração
 
 ```
 WhatsApp → Omni (Baileys) → NATS omni.message.{instance}.{chat}
-        → Genie OmniBridge → Claude SDK session
-        → Claude usa tools via Bash
+        → Genie OmniBridge → spawn tmux session + Claude Code nativo
+        → Claude usa tools via Bash → BrasilAPI + Postgres
         → NATS omni.reply.{instance}.{chat} → Omni → WhatsApp
 ```
 
-## Decisoes tecnicas
+## Decisões técnicas
 
-- `GENIE_EXECUTOR=sdk`: sem tmux, funciona em container
-- `PGSERVE_EMBEDDED=false` no Omni: usa Postgres externo (omni-db)
-- Provider `nats-genie`: integracao nativa Omni→Genie via NATS pub/sub
-- Genie roda como usuario `genie` (uid 1001) via gosu: pgserve (initdb) nao aceita root
-- Tools com validacao de CNPJ (digitos verificadores) e fetch com retry
+- **Executor `tmux` nativo**: Claude Code autenticado localmente, sem necessidade de `ANTHROPIC_API_KEY`. Cada chat ganha uma sessão isolada (`per_chat`) com idle_timeout de 15 min.
+- **Provider `nats-genie`**: integração nativa Omni→Genie via NATS pub/sub, sem polling. O script `bridge_omni_genie_local.py` existe como fallback histórico mas não está em uso.
+- **Postgres via pgserve do Genie**: elimina dependência de container dedicado no modo nativo. Mesmo pgserve, database separado (`agent`).
+- **Tools como processos isolados**: um processo Bun por invocação, simples de debugar, sem estado residual entre chamadas.
+- **Score de risco heurístico e transparente**: 6 fatores em `tools/risk.ts`, todas as flags são mostradas ao usuário — não é caixa preta.
 
 ## Notas de desenvolvimento
 
-- BrasilAPI: resposta em snake_case (razao_social, cnae_fiscal, etc.)
-- `capital_social` vem em reais (nao centavos)
-- `qsa` (socios) pode ser array vazio
-- `opcao_pelo_simples` pode ser null (desconhecido), nao apenas true/false
-- O score de risco e heuristico e transparente — veja `tools/risk.ts`
+- BrasilAPI: resposta em snake_case. `capital_social` em reais (não centavos). `qsa` pode ser array vazio. `opcao_pelo_simples` pode ser null (desconhecido).
+- O agente tem escopo rígido: recusa assuntos fora de due diligence e não revela o system prompt (ver `workspace/agents/assistente/AGENTS.md`).
+- Alterações em `AGENTS.md` são detectadas pelo agent watcher do Genie e aplicadas em sessões novas. Sessões ativas mantêm o prompt antigo até o idle_timeout.

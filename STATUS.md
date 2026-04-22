@@ -54,16 +54,11 @@ Documento de controle interno. Registra o que foi implementado, o que ainda falt
 
 ## O que falta
 
-### Bloqueios ativos
-
-- [ ] **Cota/uso do Claude Code** — no modo nativo com `GENIE_EXECUTOR=tmux`, o pipeline chega a spawnar a sessao, mas pode falhar com erro explicito de cota, como `API Error: Extra usage is required for 1M context`.
-- [ ] **Ajuste fino da resposta end-to-end** — Omni e Genie ja estao integrados localmente; falta validar resposta completa no WhatsApp assim que a cota do Claude voltar.
-
 ### Implementacao pendente
 
-- [ ] **Teste end-to-end apos retorno da cota** — mandar mensagem nova no WhatsApp e confirmar resposta do agente
 - [x] **Modo nativo com executor tmux** — configurado em `workspace/` e documentado em `scripts/start-genie-local.sh`
-- [ ] **Testes automatizados** — nao implementado
+- [x] **Testes automatizados** — 5 suites em `tests/` (helpers, risk, db, edge-cases, integration)
+- [x] **Teste end-to-end** — agente respondendo no WhatsApp via instancia `duedi` (provider `nats-genie`)
 
 ### Melhorias identificadas mas nao prioritarias
 
@@ -71,28 +66,16 @@ Documento de controle interno. Registra o que foi implementado, o que ainda falt
 - [ ] Watch list (monitoramento periodico de empresas)
 - [ ] Analise de rede societaria
 - [ ] Exportacao do pipeline para CSV
-
----
-
-## Bloqueios e decisoes pendentes
-
-| Item | Situacao | Acao necessaria |
-|------|----------|-----------------|
-| Claude Code sem cota | Ativo | Esperar renovacao de uso / ajustar contexto do modelo se necessario |
-| WhatsApp para testes | Disponivel | Repetir teste assim que a cota voltar |
-| Dois modos de execucao | Parcial | Docker continua opcional; modo nativo ja documentado |
-| Testes automatizados | Nao iniciado | Implementar se sobrar tempo |
+- [ ] Reconciliar docker-compose (entrypoint morto em `docker/omni/`, comando de QR desatualizado em `setup-omni.sh`) — modo nativo e o suportado; docker virou stretch goal
 
 ---
 
 ## Proximos passos em ordem de prioridade
 
-1. Esperar retorno da cota do Claude Code
-2. Rodar `./scripts/start-genie-local.sh`
-3. Mandar mensagem nova no WhatsApp
-4. Validar resposta no `genie-local.log` e no chat
-5. Se houver erro novo, corrigir o fluxo final
-6. Implementar testes automatizados
+1. Validar conversa real de ponta a ponta no WhatsApp (CNPJ → marcar → listar)
+2. Capturar transcript real no README substituindo o exemplo ficticio
+3. Limpar ou anotar caminho docker como experimental
+4. Considerar melhorias nao prioritarias caso sobre tempo
 
 ---
 
