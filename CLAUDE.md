@@ -8,13 +8,13 @@ Stack: Genie (orquestrador) + Omni (bridge WhatsApp) + Claude Code nativo (via t
 Dois caminhos suportados, escolha um:
 
 1. **Nativo (default, validado)** — Genie, Omni, NATS e Claude Code rodam direto na máquina. Usa o pgserve embedado do Genie na porta `19642`. É o fluxo documentado no README.
-2. **Docker (stretch goal, não validado end-to-end)** — `docker-compose.yml` com containers separados para NATS, Omni, agent-db e Genie. Pode servir como referência de arquitetura, mas tem arestas (entrypoint do omni não integrado ao Dockerfile; comando de QR em `setup-omni.sh` aponta para caminho do monorepo que não existe na imagem publicada). Se for usar, trate como experimental.
+2. **Docker (stretch goal, não validado end-to-end)** — `docker-compose.yml` com containers separados para NATS, Omni, agent-db e Genie. Pode servir como referência de arquitetura. Se for usar, trate como experimental.
 
 ## Estrutura do projeto
 
 ```
 docker-compose.yml          # stretch goal — ver seção acima
-docker/
+docker/                     # stretch goal (ver seção acima)
   omni/Dockerfile           # bun add -g @automagik/omni
   genie/
     Dockerfile              # bun add -g @automagik/genie + gosu
@@ -35,8 +35,6 @@ tools/                      # ferramentas TypeScript (Bun)
 scripts/
   start-genie-local.sh      # modo nativo: Genie com executor tmux + Claude Code local
   omni-ecosystem.json       # PM2: NATS + Omni API
-  setup-omni.sh             # legado docker — não usar no modo nativo
-  bridge_omni_genie_local.py # fallback (polling Omni→NATS) — inativo; provider nats-genie é o oficial
 tests/                      # 5 suites: helpers, risk, db, edge-cases, integration
 ```
 
@@ -102,7 +100,7 @@ WhatsApp → Omni (Baileys) → NATS omni.message.{instance}.{chat}
 ## Decisões técnicas
 
 - **Executor `tmux` nativo**: Claude Code autenticado localmente, sem necessidade de `ANTHROPIC_API_KEY`. Cada chat ganha uma sessão isolada (`per_chat`) com idle_timeout de 15 min.
-- **Provider `nats-genie`**: integração nativa Omni→Genie via NATS pub/sub, sem polling. O script `bridge_omni_genie_local.py` existe como fallback histórico mas não está em uso.
+- **Provider `nats-genie`**: integração nativa Omni→Genie via NATS pub/sub, sem polling. O comando `omni connect <instance> assistente --nats-url localhost:4222` registra o provider e roteia mensagens automaticamente.
 - **Postgres via pgserve do Genie**: elimina dependência de container dedicado no modo nativo. Mesmo pgserve, database separado (`agent`).
 - **Tools como processos isolados**: um processo Bun por invocação, simples de debugar, sem estado residual entre chamadas.
 - **Score de risco heurístico e transparente**: 6 fatores em `tools/risk.ts`, todas as flags são mostradas ao usuário — não é caixa preta.

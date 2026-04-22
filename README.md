@@ -239,8 +239,7 @@ O WhatsApp permanece conectado entre reinicializações (sessão salva no pgserv
 │   └── listar-empresas.ts          # Listagem com filtros
 └── scripts/
     ├── omni-ecosystem.json         # PM2: NATS + Omni API
-    ├── start-genie-local.sh        # Sobe Genie no workspace correto
-    └── bridge_omni_genie_local.py  # Bridge de fallback (Omni→NATS polling)
+    └── start-genie-local.sh        # Sobe Genie no workspace correto
 ```
 
 ---

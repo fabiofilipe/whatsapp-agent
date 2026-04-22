@@ -32,7 +32,7 @@ Documento de controle interno. Registra o que foi implementado, o que ainda falt
 
 ### Automacao
 
-- [x] `scripts/setup-omni.sh` — cria instancia WhatsApp, aguarda QR, cria provider `nats-genie`, vincula provider, salva IDs no `.env`
+- [x] Setup documentado via comandos diretos no README (pairing code sem QR + `omni connect`)
 
 ### Documentacao e repositorio
 
@@ -66,7 +66,7 @@ Documento de controle interno. Registra o que foi implementado, o que ainda falt
 - [ ] Watch list (monitoramento periodico de empresas)
 - [ ] Analise de rede societaria
 - [ ] Exportacao do pipeline para CSV
-- [ ] Reconciliar docker-compose (entrypoint morto em `docker/omni/`, comando de QR desatualizado em `setup-omni.sh`) — modo nativo e o suportado; docker virou stretch goal
+- [ ] Revalidar docker-compose end-to-end (modo nativo e o suportado; docker virou stretch goal)
 
 ---
 
